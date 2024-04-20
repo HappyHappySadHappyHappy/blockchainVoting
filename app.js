@@ -1,154 +1,178 @@
 const express = require("express");
 const hash = require("object-hash");
 const app = express();
+const ejs = require("ejs");
+const bodyParser = require("body-parser");
 const mongoose = require("mongoose");
 
+app.use(express.static("public"));
+app.set('view engine','ejs');
+app.use(bodyParser.urlencoded({extended:true}));
 //connection with database
 mongoose.connect("mongodb+srv://admin-harshit:test123@cluster0.5v6tyuh.mongodb.net/blockchain");
 
+
+
+const Candidates = ["Bjp", "Congress", "Aap"]
+//connection with database
+
+
 // schema defined 
 const blockSchema = mongoose.Schema({
-    id:{
-        type:Number
-    },
+    _id: Number,
     innerBlock:
     {
         lastBlock: String,
         transaction: String
     },
-    currentHash: String
+    currentHash: String,
+    date: String
 }, { versionKey: false });
 
 //collection created
 const blocks = new mongoose.model("block", blockSchema);
 
 //function to create a new block or new entry
-function block(lastBlock, transaction) {
+function block(lastBlock, transaction, count) {
     const block = {
+        _id: count,
         innerBlock:
         {
             lastBlock: hash(lastBlock),
             transaction: hash(transaction)
         },
-        currentHash: null
+        currentHash: null,
+        date: new Date()
     }
     block.currentHash = hash(block.innerBlock);
     return block;
 }
 
+
+function findWinner(votes) {
+    let maxVotes = -Infinity;
+    let winner = null;
+    for (const candidate in votes) {
+        if (votes.hasOwnProperty(candidate)) {
+            const voteCount = votes[candidate];
+            if (voteCount > maxVotes) {
+                maxVotes = voteCount;
+                winner = candidate;
+            }
+        }
+    }
+    return winner;
+}
+
 const genisisBlock = {
+    _id: -1,
     innerBlock: {
-        previousBlock: 0,
+        lastBlock: 0,
         transaction: null
     },
-    currentHash: null
+    currentHash: null,
+    date: null
 }
 genisisBlock.currentHash = hash(genisisBlock.innerBlock);
 
-app.get("/", function (req, res) {
-    res.send("hello world");
+app.get('/', (req, res) => {  
+    res.render("index");
 });  
 
-
 app.post("/", async function (req, res) {
-    
+
     const transaction = req.query.transaction;
     console.log(transaction);
 
-    var lastEntry = null;
+    if (Candidates.includes(transaction)) {
 
-    const count = await blocks.countDocuments();
-    console.log(count);
+        var lastEntry = null;
 
-    if (count == 0) {
-        lastEntry = genisisBlock
-    } else {
-        await blocks.findOne({}, {}, { sort: { '_id': -1 } }).then(function (lastBlock, err) {
-            if (err) {
-                console.error("Error retrieving last block:", err);
-                return;
-            }
-            lastEntry = {
-                innerBlock: lastBlock.innerBlock,
-                currentHash: lastBlock.currentHash
-            };
-            console.log("Last inserted block:", lastBlock);
-            console.log(hash(lastBlock._id));
+        const count = await blocks.countDocuments();
+        console.log(count);
+
+        if (count == 0) {
+            lastEntry = genisisBlock
+        } else {
+            await blocks.findOne({ _id: count - 1 }).then(function (lastBlock, err) {
+                if (err) {
+                    console.error("Error retrieving last block:", err);
+                    return;
+                }
+                
+                lastEntry = {
+                    innerBlock: lastBlock.innerBlock,
+                    currentHash: lastBlock.currentHash
+                };
+                console.log("Last inserted block:", lastBlock);
+                console.log(hash(lastBlock._id));
+            });
+        }
+        // const total_documents = db.blocks.count()
+        const newBlock = block(lastEntry, transaction, count);
+        var tmp = 0
+        const newEntry = new blocks({
+            _id: newBlock._id,
+            innerBlock:
+            {
+                lastBlock: newBlock.innerBlock.lastBlock,
+                transaction: newBlock.innerBlock.transaction
+            },
+            currentHash: newBlock.currentHash,
+            date : newBlock.date
         });
-    }
-    
-    const newBlock = block(lastEntry, transaction);
-   
-    const newEntry = new blocks({
-        id: count + 1,
-        innerBlock:
-        {   
-            lastBlock: newBlock.innerBlock.lastBlock,
-            transaction: newBlock.innerBlock.transaction
-        },
-        currentHash: newBlock.currentHash
-    });
-    
-    newEntry.save().then(function () {
-        res.send("voted sccessfully");
-    });
 
+        newEntry.save().then(function () {
+            res.send("Vote casted sccessfully");
+        });
+    } else {
+        res.send("Invalid Vote casted.Try Again!!");
+    }
+    console.log(req.get("User-Agent"));
 });
 
-app.get("/calculate", function (req, res) {
-    Vote = {
-        BJP : 0,
-        Congress : 0
+app.get("/calculate", async function (req, res) {
+    Vote = {} 
+    Candidates.forEach(candidate => {
+        Vote[candidate] = 0;
+    });
+    const count = await blocks.countDocuments();
+    console.log(count)
+    let hashLastBlock = hash(genisisBlock);
+    // Fetch the first block separately
+    await blocks.findOne({ _id: 0 }).then(function (Block, err) {
+        Candidates.forEach(candidate => {
+            if (Block.innerBlock.transaction == hash(candidate)) {
+                Vote[candidate] = Vote[candidate] + 1
+            }
+        })
+    });
+    for (let i = 1; i < count; i++) { // Start from 1 since we've already processed the first block
+        await blocks.findOne({ _id: i }).then(function (Block, err) {
+            if (Block.innerBlock.lastBlock.localeCompare(hashLastBlock)) {
+                console.log(Block._id)
+                Candidates.forEach(candidate => {
+                    if (Block.innerBlock.transaction == hash(candidate)) {
+                        Vote[candidate] = Vote[candidate] + 1
+                    }
+                })
+                newBlock={
+                    _id:Block._id,
+                    innerBlock:{
+                        lastBlock:Block.innerBlock.lastBlock,
+                        transaction:Block.innerBlock.transaction
+                    },
+                    currentHash:Block.currentHash,
+                    date:Block.date
+                }
+                
+                hashLastBlock = hash(newBlock)
+            }
+        })
     }
-    
-    // Retrieve documents from the collection
-    const cursor = blocks.find().sort({ _id: 1 }); // Sorting by _id in ascending order
-    console.log(cursor); // Log the cursor object to inspect its properties
-
-    previousHash = hash(genisisBlock);
-    // Iterate over the cursor
-
-    cursor.toArray().then(docs => {
-        docs.forEach(doc => {
-            if(doc.innerBlock.lastBlock != previousHash){
-                res.send("Verification not successful")
-                return;
-            }
-            if(hash(doc.innerBlock.transaction) == hash("BJP")){
-                Vote.BJP++;
-            }
-            if(hash(doc.innerBlock.transaction) == hash("Congress")){
-                Vote.Congress++;
-            }
-            if(hash(doc.innerBlock) != doc.currentHash){
-                res.send("Verification not successful")
-                return;
-            }
-            previousHash = hash(doc);
-          // Process each document here
-          console.log(doc);
-        });
-      });
-      
-
-    // cursor.forEach(doc => {
-    //     // Process the document
-    //     console.log(doc);
-        
-    // }, err => {
-    //     if (err) {
-    //         console.error("Error iterating over cursor:", err);
-    //         return;
-    //     }
-    //     console.log("Cursor iteration complete.");
-    // });
-    
     res.send(Vote);
 });
-
 
 app.listen(3000, function () {
     console.log("server on at 3000");
 });
-  
-
